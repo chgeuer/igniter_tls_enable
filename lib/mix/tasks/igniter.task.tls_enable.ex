@@ -1,7 +1,12 @@
 defmodule Mix.Tasks.Igniter.Task.TLSEnable do
   use Igniter.Mix.Task
 
-  @example "mix igniter.task.TLSEnable --hostname beast.geuer-pollmann.de"
+  @deps [
+    {:ssl_verify_fun, "~> 1.1.7", manager: :rebar3, override: true},
+    {:x509, "~> 0.8.7"}
+  ]
+
+  @example "mix Igniter.Task.TLSEnable --hostname beast.geuer-pollmann.de"
 
   @shortdoc "A short description of your task"
 
@@ -60,16 +65,21 @@ defmodule Mix.Tasks.Igniter.Task.TLSEnable do
       igniter
       |> Igniter.Libs.Phoenix.web_module_name("Endpoint")
 
+    cert_module =
+      igniter
+      |> Igniter.Libs.Phoenix.web_module_name("Certificates")
+
     app_name =
       igniter
       |> Igniter.Project.Application.app_name()
 
     igniter
-    |> add_deps()
-    |> create_certificate_module()
+    |> add_deps(@deps)
+    |> create_certificate_module(cert_module)
     |> set_config_url_config_exs(hostname, endpoint_module, app_name)
-    |> set_config_url_prod_exs(endpoint_module, app_name)
-    |> create_launch_browser_task(hostname, endpoint_module)
+    |> set_config_url_exs("prod.exs", app_name, endpoint_module, cert_module, hostname)
+    # |> set_config_url_exs("dev.exs", app_name, endpoint_module, cert_module, hostname)
+    |> create_launch_browser_task(endpoint_module)
   end
 
   defp set_config_url_config_exs(igniter, hostname, endpoint_module, app_name) do
@@ -82,16 +92,14 @@ defmodule Mix.Tasks.Igniter.Task.TLSEnable do
     )
   end
 
-  defp set_config_url_prod_exs(igniter, endpoint_module, app_name) do
-    cert_module = Igniter.Project.Module.module_name(igniter, "Certificates")
-
+  defp set_config_url_exs(igniter, file_name, app_name, endpoint_module, cert_module, hostname)
+       when is_atom(endpoint_module) and is_atom(cert_module) do
     igniter
     |> Igniter.Project.Config.configure(
-      "prod.exs",
+      file_name,
       app_name,
       endpoint_module,
       http: [
-        # {127, 0, 0, 1},
         ip: :any,
         port: 8080,
         http_1_options: [max_header_length: 32768]
@@ -100,8 +108,8 @@ defmodule Mix.Tasks.Igniter.Task.TLSEnable do
         ip: :any,
         port: 8443,
         cipher_suite: :strong,
-        certfile: "/home/chgeuer/beast.geuer-pollmann.de.crt",
-        keyfile: "/home/chgeuer/beast.geuer-pollmann.de.key",
+        certfile: Path.join([System.user_home(), "#{hostname}.crt"]),
+        keyfile: Path.join([System.user_home(), "#{hostname}.key"]),
         thousand_island_options: [
           transport_options: [
             sni_fun: &cert_module.sni_fun/1
@@ -112,17 +120,42 @@ defmodule Mix.Tasks.Igniter.Task.TLSEnable do
     )
   end
 
-  defp create_launch_browser_task(igniter, hostname, endpoint_module) do
+  defp create_launch_browser_task(igniter, endpoint_module)
+       when is_atom(endpoint_module) do
     igniter
     |> Igniter.Project.Module.create_module(
       Mix.Tasks.LaunchBrowser,
       ~s'''
       use Mix.Task
 
+      defp by_os(%{mac: mac, linux: linux, wsl: wsl, windows: windows}) do
+        case :os.type() do
+          {:unix, :darwin} ->
+            mac
+
+          {:unix, _} ->
+            case System.get_env("WSL_DISTRO_NAME") do
+              nil -> linux
+              x when is_binary(x) -> wsl
+            end
+
+          {:win32, _} ->
+            windows
+        end
+      end
+
       def run(_) do
-        url = "https://#{hostname}:\#{#{endpoint_module}.access_struct_url.port}/?\#{#{endpoint_module}.access_struct_url.query}"
+        url = #{endpoint_module}.url()
         IO.puts("Opening browser at: \#{url}")
-        System.cmd("/mnt/c/Windows/system32/cmd.exe", ["/C", "start \#{url}"])
+
+        %{
+          mac:     {"open", [url]},
+          linux:   {"xdg-open", [url]},
+          wsl:     {"/mnt/c/Windows/system32/cmd.exe", ["/C", "start \#{url}"]},
+          windows: {"cmd.exe", ["/C", "start \#{url}"]}
+        }
+        |> by_os()
+        |> then(fn {command, args} -> System.cmd(command, args) end)
       end
       '''
     )
@@ -132,15 +165,15 @@ defmodule Mix.Tasks.Igniter.Task.TLSEnable do
     ])
   end
 
-  defp create_certificate_module(igniter) do
+  defp create_certificate_module(igniter, cert_module) when is_atom(cert_module) do
     Igniter.Project.Module.create_module(
       igniter,
-      Igniter.Libs.Phoenix.web_module_name(igniter, "Certificates"),
+      cert_module,
       ~s'''
       def cert_dir() do
         case :os.type() do
-          {:unix, :linux} -> "/home/chgeuer"
-          {:win32, :nt} -> "C:/Users/chgeuer/.lego/certificates"
+          {:unix, :linux} -> System.user_home()
+          {:win32, :nt} -> Path.join([System.user_home(), ".lego", "certificates"])
         end
       end
 
@@ -166,12 +199,9 @@ defmodule Mix.Tasks.Igniter.Task.TLSEnable do
     )
   end
 
-  defp add_deps(igniter) do
-    igniter
-    |> Igniter.Project.Deps.add_dep(
-      {:ssl_verify_fun, "~> 1.1.7", manager: :rebar3, override: true},
-      append?: true
-    )
-    |> Igniter.Project.Deps.add_dep({:x509, "~> 0.8.7"}, append?: true)
+  defp add_deps(igniter, deps) do
+    Enum.reduce(deps, igniter, fn d, i ->
+      Igniter.Project.Deps.add_dep(i, d, append?: true)
+    end)
   end
 end
