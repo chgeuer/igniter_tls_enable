@@ -8,7 +8,7 @@ defmodule Mix.Tasks.Igniter.Task.TLSEnable do
 
   @example "mix Igniter.Task.TLSEnable --hostname beast.geuer-pollmann.de"
 
-  @shortdoc "A short description of your task"
+  @shortdoc "Enables TLS for your Phoenix project using certificates from Let's Encrypt which are stored in your home directory."
 
   @moduledoc """
   #{@shortdoc}
@@ -23,7 +23,7 @@ defmodule Mix.Tasks.Igniter.Task.TLSEnable do
 
   ## Options
 
-  * `--example-option` or `-e` - Docs for your option
+  * `--hostname` or `-h` - Hostname for the certificate
   """
 
   @impl Igniter.Mix.Task
