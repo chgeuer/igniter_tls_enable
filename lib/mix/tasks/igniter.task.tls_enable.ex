@@ -78,7 +78,7 @@ defmodule Mix.Tasks.Igniter.Task.TLSEnable do
     |> create_certificate_module(cert_module)
     |> set_config_url_config_exs(hostname, endpoint_module, app_name)
     |> set_config_url_exs("prod.exs", app_name, endpoint_module, cert_module, hostname)
-    # |> set_config_url_exs("dev.exs", app_name, endpoint_module, cert_module, hostname)
+    |> set_config_url_exs("dev.exs", app_name, endpoint_module, cert_module, hostname)
     |> create_launch_browser_task(endpoint_module)
   end
 
@@ -94,30 +94,56 @@ defmodule Mix.Tasks.Igniter.Task.TLSEnable do
 
   defp set_config_url_exs(igniter, file_name, app_name, endpoint_module, cert_module, hostname)
        when is_atom(endpoint_module) and is_atom(cert_module) do
+    set = fn igniter, path, value ->
+      Igniter.Project.Config.configure(
+        igniter,
+        file_name,
+        app_name,
+        List.flatten([endpoint_module], path),
+        value
+      )
+    end
+
     igniter
-    |> Igniter.Project.Config.configure(
-      file_name,
-      app_name,
-      endpoint_module,
-      http: [
-        ip: :any,
-        port: 8080,
-        http_1_options: [max_header_length: 32768]
-      ],
-      https: [
-        ip: :any,
-        port: 8443,
-        cipher_suite: :strong,
-        certfile: Path.join([System.user_home(), "#{hostname}.crt"]),
-        keyfile: Path.join([System.user_home(), "#{hostname}.key"]),
-        thousand_island_options: [
-          transport_options: [
-            sni_fun: &cert_module.sni_fun/1
-            # socket_opts: [log_level: :info]
-          ]
-        ]
+    |> set.([:http, :ip], :any)
+    |> set.([:http, :port], 8080)
+    |> set.([:http, :http_1_options], max_header_length: 32768)
+    |> set.([:https, :ip], :any)
+    |> set.([:https, :port], 8443)
+    |> set.([:https, :cipher_suite], :strong)
+    |> set.([:https, :certfile], Path.join([System.user_home(), "#{hostname}.crt"]))
+    |> set.([:https, :keyfile], Path.join([System.user_home(), "#{hostname}.key"]))
+    |> set.([:https, :thousand_island_options],
+      transport_options: [
+        sni_fun: &cert_module.sni_fun/1
+        # socket_opts: [log_level: :info]
       ]
     )
+
+    # igniter
+    # |> Igniter.Project.Config.configure(
+    #   file_name,
+    #   app_name,
+    #   endpoint_module,
+    #   http: [
+    #     ip: :any,
+    #     port: 8080,
+    #     http_1_options:
+    #   ],
+    #   https: [
+    #     ip: :any,
+    #     port: 8443,
+    #     cipher_suite: :strong,
+    #     certfile: Path.join([System.user_home(), "#{hostname}.crt"]),
+    #     keyfile: Path.join([System.user_home(), "#{hostname}.key"]),
+    #     thousand_island_options: [
+    #       transport_options: [
+    #         sni_fun: &cert_module.sni_fun/1
+    #         # socket_opts: [log_level: :info]
+    #       ]
+    #     ]
+    #   ]
+    # )
   end
 
   defp create_launch_browser_task(igniter, endpoint_module)
